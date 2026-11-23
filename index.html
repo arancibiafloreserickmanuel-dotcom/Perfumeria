@@ -1833,10 +1833,18 @@
       fetch(mcfg.api + "/api/salud?codigo=" + encodeURIComponent(mcfg.codigo), ctl ? { signal: ctl.signal } : {})
         .then(function(r){ clearTimeout(to); cb(r.ok); }).catch(function(){ clearTimeout(to); cb(false); });
     }
+    function mostrarTarjeta(p){
+      var wrap = document.createElement("div"); wrap.className = "tk-recs";
+      var c = document.createElement("div"); c.className = "tk-rec";
+      var img = document.createElement("img"); img.src = p.imagen; img.alt = p.marca + " " + p.nombre;
+      var d = document.createElement("div"), b = document.createElement("b"), em = document.createElement("em"), pp = document.createElement("p");
+      b.textContent = p.marca + " " + p.nombre; em.textContent = (p.ml ? p.ml + " ml · " : "") + p.precio; pp.textContent = "Disponible en nuestra tienda.";
+      d.appendChild(b); d.appendChild(em); d.appendChild(pp); c.appendChild(img); c.appendChild(d); wrap.appendChild(c); log.appendChild(wrap); scroll();
+    }
     async function preguntar(texto){
       busy = true; parar(); opts.innerHTML = "";
       var t = document.createElement("div"); t.className = "tk-m bot typing"; t.innerHTML = "<i></i><i></i><i></i>"; log.appendChild(t); scroll();
-      var burbuja = null, partes = {}, sig = 0, fallo = false;
+      var burbuja = null, partes = {}, sig = 0, fallo = false, opcionesFinales = null;
       try{
         var r = await fetch(mcfg.api + "/api/chat", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ sesion:sesion, mensaje:texto, voz:voz, codigo:mcfg.codigo }) });
         if(!r.ok) throw new Error(r.status);
@@ -1850,11 +1858,17 @@
             if(e.t === "relleno"){ if(voz && e.b64){ cola.push(e); reproducir(); } }
             else if(e.t === "frase"){ t.remove(); if(!burbuja) burbuja = msg("", "bot"); burbuja.textContent += (burbuja.textContent ? " " : "") + e.texto; scroll(); }
             else if(e.t === "audio" && e.b64){ partes[e.parte] = e; while(partes[sig]){ if(voz) cola.push(partes[sig]); sig++; } if(voz) reproducir(); }
+            else if(e.t === "fin"){ if(e.tarjeta) mostrarTarjeta(e.tarjeta); if(e.opciones && e.opciones.length) opcionesFinales = e.opciones; }
             else if(e.t === "error"){ t.remove(); msg(e.detalle || "No pude responder en este momento.", "bot"); }
           }
         }
       }catch(err){ fallo = true; }
       t.remove(); busy = false;
+      if(!fallo && opcionesFinales){
+        var ops = opcionesFinales;
+        showOpts(ops.map(function(o){ return o.etiqueta; }), function(i, label){ if(busy) return; opts.innerHTML = ""; msg(label, "me"); preguntar(ops[i].mensaje); });
+        scroll();
+      }
       if(fallo){
         model = false; vozBtn.style.display = "none";
         step = -1; ans = [];
