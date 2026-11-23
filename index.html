@@ -449,6 +449,8 @@
   .tk-chat-bar .tk-voz.on{ background:#f6f2e9; color:#18160f; }
   .tk-qr{ align-self:flex-start; max-width:260px; padding:14px; border-radius:16px; background:rgba(246,242,233,.07); border:1px solid rgba(246,242,233,.1); text-align:center; animation:tkIn .4s ease both; }
   .tk-qr img{ width:100%; max-width:220px; height:auto; border-radius:10px; background:#fff; padding:8px; margin:0 auto; display:block; }
+  .tk-rec-ph{ width:78px; height:78px; border-radius:12px; display:grid; place-items:center; background:rgba(246,242,233,.1); border:1px solid rgba(246,242,233,.14); font-family:var(--f-serif); font-style:italic; font-size:30px; color:var(--accent); }
+  .tk-verif{ max-width:300px; border-color:rgba(154,176,124,.45); } .tk-verif b{ font-family:var(--f-sans); font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:#9ab07c; }
   .tk-qr p{ margin:10px 0 0; font-family:var(--f-serif); font-size:13px; line-height:1.4; color:rgba(248,244,233,.74); }
   .tk-chat-bar .tk-mic{ background:none; color:#f8f4e9; border:1px solid rgba(246,242,233,.28); transition:background .25s ease, color .25s ease; }
   .tk-chat-bar .tk-mic:hover{ border-color:#f6f2e9; }
@@ -1868,8 +1870,14 @@
     }
     function tarjetaEl(p, i){
       var c = document.createElement("div"); c.className = "tk-rec"; if(i) c.style.animationDelay = (i*120) + "ms";
-      var img = document.createElement("img"); img.src = p.imagen || ""; img.alt = (p.marca || "") + " " + (p.nombre || "");
-      img.onerror = function(){ img.style.visibility = "hidden"; };
+      /* sin foto (imagen null o que no carga): marcador con la inicial de la marca */
+      var inicial = ((p.marca || p.nombre || "•").trim().charAt(0) || "•").toUpperCase();
+      function marcador(){ var h = document.createElement("div"); h.className = "tk-rec-ph"; h.textContent = inicial; return h; }
+      var img;
+      if(p.imagen){
+        img = document.createElement("img"); img.src = p.imagen; img.alt = (p.marca || "") + " " + (p.nombre || "");
+        img.onerror = function(){ if(img.parentNode) img.parentNode.replaceChild(marcador(), img); };
+      } else { img = marcador(); }
       var d = document.createElement("div"), b = document.createElement("b"), em = document.createElement("em"), pp = document.createElement("p");
       b.textContent = ((p.marca || "") + " " + (p.nombre || "")).trim();
       em.textContent = (p.ml ? p.ml + " ml · " : "") + (p.precio == null ? "" : p.precio);
@@ -1885,7 +1893,7 @@
     function mostrarTarjetas(lista){
       var wrap = document.createElement("div"); wrap.className = "tk-recs";
       lista.forEach(function(p, i){
-        var c = tarjetaEl(p, i), msgElegir = p.mensaje || p.mensaje_elegir || p.elegir;
+        var c = tarjetaEl(p, i), msgElegir = p.elegir;
         if(msgElegir){
           c.style.cursor = "pointer"; c.setAttribute("role", "button"); c.tabIndex = 0;
           var go = function(){ if(busy) return; opts.innerHTML = ""; msg(String(msgElegir), "me"); preguntar(String(msgElegir)); };
@@ -1895,6 +1903,15 @@
         wrap.appendChild(c);
       });
       log.appendChild(wrap); scroll();
+    }
+    /* el cliente dice «ya pagué»: aviso de pago en verificación (la tienda confirma el cobro; la página no cobra ni confirma nada) */
+    function mostrarVerificacion(ped){
+      var wrap = document.createElement("div"); wrap.className = "tk-recs";
+      var box = document.createElement("div"); box.className = "tk-qr tk-verif";
+      var b = document.createElement("b"); b.textContent = "Pago en verificación";
+      var p = document.createElement("p");
+      p.textContent = (ped && ped.numero ? "Pedido " + ped.numero + ". " : "") + "Recibimos tu aviso. La tienda confirmará el pago y te avisará por este chat.";
+      box.appendChild(b); box.appendChild(p); wrap.appendChild(box); log.appendChild(wrap); scroll();
     }
     /* QR de pago: imagen propia del negocio (images/qr-pago.png). Si el archivo no existe, avisa en vez de mostrar uno falso. */
     function mostrarQR(info){
@@ -1926,6 +1943,7 @@
             else if(e.t === "fin" || e.t === "accion"){
               if(e.tarjetas && e.tarjetas.length) mostrarTarjetas(e.tarjetas); else if(e.tarjeta) mostrarTarjeta(e.tarjeta);
               if(e.accion === "mostrar_qr") mostrarQR(e.qr || e.datos);
+              else if(e.accion === "verificar_pago") mostrarVerificacion(e.pedido);
               if(e.opciones && e.opciones.length) opcionesFinales = e.opciones;
             }
             else if(e.t === "error"){ t.remove(); msg(e.detalle || "No pude responder en este momento.", "bot"); }
