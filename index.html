@@ -444,6 +444,10 @@
   .tk-chat-bar input::placeholder{ color:rgba(246,242,233,.5); }
   .tk-chat-bar .tk-voz{ width:auto; height:30px; padding:0 12px; border-radius:99px; background:none; border:1px solid rgba(246,242,233,.28); color:#f8f4e9; font-family:var(--f-sans); font-size:11px; letter-spacing:.06em; }
   .tk-chat-bar .tk-voz.on{ background:#f6f2e9; color:#18160f; }
+  .tk-chat-bar .tk-mic{ background:none; color:#f8f4e9; border:1px solid rgba(246,242,233,.28); transition:background .25s ease, color .25s ease; }
+  .tk-chat-bar .tk-mic:hover{ border-color:#f6f2e9; }
+  .tk-chat-bar .tk-mic.on{ background:#a9875a; color:#121214; border-color:#a9875a; animation:micPulse 1.3s ease-in-out infinite; }
+  @keyframes micPulse{ 0%{ box-shadow:0 0 0 0 rgba(169,135,90,.55); } 70%{ box-shadow:0 0 0 10px rgba(169,135,90,0); } 100%{ box-shadow:0 0 0 0 rgba(169,135,90,0); } }
   .tk-chat-bar button{ width:40px; height:40px; border-radius:50%; background:#f6f2e9; color:#18160f; display:grid; place-items:center; flex:0 0 auto; }
   .tk-recs{ display:flex; flex-direction:column; gap:10px; align-self:stretch; max-width:100%; }
   .tk-rec{ display:grid; grid-template-columns:78px 1fr; gap:14px; padding:10px; border-radius:16px; background:rgba(246,242,233,.07); border:1px solid rgba(246,242,233,.1); animation:tkIn .4s ease both; }
@@ -1816,6 +1820,28 @@
     var vozBtn = document.createElement("button"); vozBtn.type = "button"; vozBtn.className = "tk-voz on"; vozBtn.textContent = "Voz"; vozBtn.title = "Respuestas habladas"; vozBtn.style.display = "none";
     form.insertBefore(vozBtn, form.querySelector('button[type="submit"]'));
     vozBtn.addEventListener("click", function(){ voz = !voz; vozBtn.classList.toggle("on", voz); if(!voz) parar(); });
+    /* micrófono: dictado por voz (Web Speech API; Chrome/Edge/Safari). Al terminar de hablar, envía el mensaje. */
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(SR){
+      var micBtn = document.createElement("button"); micBtn.type = "button"; micBtn.className = "tk-mic"; micBtn.setAttribute("aria-label", "Hablar"); micBtn.title = "Hablar";
+      micBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+      form.insertBefore(micBtn, form.querySelector('button[type="submit"]'));
+      var rec = new SR(), escuchando = false;
+      rec.lang = "es-BO"; rec.interimResults = true; rec.continuous = false;
+      rec.onresult = function(ev){
+        var t = ""; for(var k = 0; k < ev.results.length; k++) t += ev.results[k][0].transcript;
+        inp.value = t;
+        if(ev.results[ev.results.length - 1].isFinal){ rec.stop(); if(form.requestSubmit) form.requestSubmit(); else form.dispatchEvent(new Event("submit", { cancelable:true })); }
+      };
+      rec.onend = function(){ escuchando = false; micBtn.classList.remove("on"); inp.placeholder = "Escribe o toca aquí para empezar…"; };
+      rec.onerror = function(ev){ escuchando = false; micBtn.classList.remove("on"); if(ev.error === "not-allowed" || ev.error === "service-not-allowed") inp.placeholder = "Permite el micrófono en tu navegador"; };
+      micBtn.addEventListener("click", function(){
+        if(escuchando){ rec.stop(); return; }
+        if(!opened) open();
+        parar(); inp.value = "";
+        try{ rec.start(); escuchando = true; micBtn.classList.add("on"); inp.placeholder = "Te escucho…"; }catch(err){}
+      });
+    }
     function parar(){ cola = []; if(sonando){ sonando.pause(); sonando = null; } }
     function reproducir(){
       if(sonando || !cola.length) return;
