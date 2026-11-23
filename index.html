@@ -1225,6 +1225,7 @@
       <div class="cap">Panel de datos</div>
       <button class="ct-nav on" type="button" data-s="tabla"><b>Productos</b><em id="ctNavN">0</em></button>
       <button class="ct-nav" type="button" data-s="import"><b>Carga masiva</b></button>
+      <button class="ct-nav" type="button" data-s="pedidos"><b>Pedidos</b><em id="ctNavPed" style="display:none">0</em></button>
       <button class="ct-nav" type="button" data-s="config"><b>Configuración</b></button>
       <div class="foot">El estado vive en memoria con la forma exacta del modelo de datos. Al conectar la base real, el mapeo es 1:1.</div>
     </nav>
@@ -1824,6 +1825,7 @@
       if(qs.get("api")){ mcfg.api = qs.get("api"); mcfg.codigo = qs.get("codigo") || mcfg.codigo; try{ localStorage.setItem(LSK, JSON.stringify(mcfg)); }catch(e){} history.replaceState(null, "", location.pathname + location.hash); }
     }catch(e){}
     mcfg.api = (mcfg.api || "").replace(/\/+$/, "");
+    window.__asesorCfg = mcfg;   /* lo lee el panel de administración (Pedidos) */
     var model = false, voz = true, cola = [], sonando = null,
         sesion = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
     var vozBtn = document.createElement("button"); vozBtn.type = "button"; vozBtn.className = "tk-voz on"; vozBtn.textContent = "Voz"; vozBtn.title = "Respuestas habladas"; vozBtn.style.display = "none";
@@ -1910,8 +1912,9 @@
       var box = document.createElement("div"); box.className = "tk-qr tk-verif";
       var b = document.createElement("b"); b.textContent = "Pago en verificación";
       var p = document.createElement("p");
-      p.textContent = (ped && ped.numero ? "Pedido " + ped.numero + ". " : "") + "Recibimos tu aviso. La tienda confirmará el pago y te avisará por este chat.";
+      p.textContent = (ped && ped.numero ? "Pedido " + ped.numero + ". " : "") + "Tu pago está en revisión: la tienda lo confirmará en breve. Mientras tanto, ¿quieres ver otro perfume?";
       box.appendChild(b); box.appendChild(p); wrap.appendChild(box); log.appendChild(wrap); scroll();
+      showOpts(["Quiero ver otro perfume"], function(i, label){ if(busy) return; opts.innerHTML = ""; msg(label, "me"); preguntar(label); });
     }
     /* QR de pago: imagen propia del negocio (images/qr-pago.png). Si el archivo no existe, avisa en vez de mostrar uno falso. */
     function mostrarQR(info){
@@ -3004,7 +3007,35 @@
 
   /* ---------- navegación ---------- */
   function setScreen(s){ ui.screen=s; root.querySelectorAll(".ct-nav").forEach(function(b){b.classList.toggle("on",b.dataset.s===s);}); render(); $("ctBody").scrollTop=0; }
-  function render(){ $("ctNavN").textContent=R.productos.length; if(ui.screen==="import") renderImport(); else if(ui.screen==="config") renderConfig(); else renderTabla(); }
+  function render(){ $("ctNavN").textContent=R.productos.length; if(ui.screen==="import") renderImport(); else if(ui.screen==="config") renderConfig(); else if(ui.screen==="pedidos"){ renderPedidos(); pedFetch(function(){ if(ui.screen==="pedidos") renderPedidos(); }); } else renderTabla(); }
+
+  /* ====================== PEDIDOS (aviso al administrador) ======================
+     Lee /api/pedidos del backend del asesor. El cliente solo ve «pago en verificación»;
+     aquí el admin ve qué pedidos declararon pago y debe confirmar el cobro en su banco. */
+  var PED={list:[],err:"",loading:false,t:0};
+  function pedUrl(){ var c=window.__asesorCfg||{}; return c.api&&c.codigo?c.api+"/api/pedidos?codigo="+encodeURIComponent(c.codigo):""; }
+  function pedPorVerificar(p){ var e=String(p.etapa||"").toLowerCase(), s=String(p.estado||"").toLowerCase(); return e==="pagado"||s.indexOf("verific")>=0; }
+  function pedFetch(done){
+    var u=pedUrl(); if(!u){ PED.err="El asesor no está conectado (falta el enlace y el código en config.js)."; PED.list=[]; return done&&done(); }
+    PED.loading=true;
+    fetch(u).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(function(j){
+      PED.list=Array.isArray(j)?j:(j&&(j.pedidos||j.data))||[]; PED.err="";
+    }).catch(function(){ PED.err="No se pudo leer /api/pedidos. Revisa que el cuaderno de Kaggle siga corriendo."; })
+    .then(function(){ PED.loading=false; PED.t=Date.now(); var n=PED.list.filter(pedPorVerificar).length, b=$("ctNavPed"); if(b){ b.textContent=n; b.style.display=n?"":"none"; } if(done) done(); });
+  }
+  function renderPedidos(){
+    var b=$("ctBody"), list=PED.list.slice().sort(function(a,c){ return pedPorVerificar(c)-pedPorVerificar(a); });
+    b.innerHTML='<div class="ct-head"><div><h1 class="ct-h">Pedidos</h1><p class="ct-sub">Los pedidos con pago declarado por el cliente aparecen primero. <b>Confirma el cobro en tu banco antes de entregar.</b> Se actualiza solo cada 20 segundos.</p></div><button class="ct-btn" type="button" id="pedRef">Actualizar</button></div>'+
+    (PED.err?'<div class="ct-card" style="margin-bottom:12px;color:#e3a193">'+esc(PED.err)+'</div>':'')+
+    '<div class="ct-tw"><table class="ct-tbl"><thead><tr><th>Estado</th><th>Pedido</th><th class="num">Monto</th><th>Modo</th><th>Dirección</th><th>Etapa</th></tr></thead><tbody>'+
+    (list.length?list.map(function(p){ var v=pedPorVerificar(p); return '<tr class="'+(v?'rwn':'')+'"><td><span class="ct-st '+(v?'u':'y')+'"><i></i>'+(v?'Pago por verificar':'En curso')+'</span></td><td class="nm"><b>'+esc(p.numero||"—")+'</b></td><td class="num">'+(p.monto!=null?esc(p.monto)+" Bs":"—")+'</td><td>'+esc(p.modo||"—")+'</td><td>'+esc(p.direccion||"—")+'</td><td>'+esc(p.etapa||"—")+'</td></tr>'; }).join(""):'<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--s-mut)">'+(PED.loading?"Cargando…":"Todavía no hay pedidos.")+'</td></tr>')+'</tbody></table></div>';
+    var rb=$("pedRef"); if(rb) rb.onclick=function(){ pedFetch(function(){ if(ui.screen==="pedidos") renderPedidos(); }); };
+  }
+  setInterval(function(){
+    if(!document.documentElement.classList.contains("logged-in")||document.hidden) return;
+    if(root.classList.contains("open")&&ui.screen!=="pedidos"&&Date.now()-PED.t<60000) return;
+    pedFetch(function(){ if(ui.screen==="pedidos"&&root.classList.contains("open")) renderPedidos(); });
+  },20000);
   function setRubro(r){ rubro=r; R=DBS[r]; ui.imp=null; ui.F={q:"",cat:"",marca:"",disp:"",low:false,attr:"",attrv:"",prob:""}; $("ctRubro").querySelectorAll("button").forEach(function(b){b.classList.toggle("on",b.dataset.r===r);}); closeDrawer(true); render(); }
 
   /* ====================== PANTALLA 1 · CARGA MASIVA ====================== */
