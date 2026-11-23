@@ -444,6 +444,9 @@
   .tk-chat-bar input::placeholder{ color:rgba(246,242,233,.5); }
   .tk-chat-bar .tk-voz{ width:auto; height:30px; padding:0 12px; border-radius:99px; background:none; border:1px solid rgba(246,242,233,.28); color:#f8f4e9; font-family:var(--f-sans); font-size:11px; letter-spacing:.06em; }
   .tk-chat-bar .tk-voz.on{ background:#f6f2e9; color:#18160f; }
+  .tk-qr{ align-self:flex-start; max-width:260px; padding:14px; border-radius:16px; background:rgba(246,242,233,.07); border:1px solid rgba(246,242,233,.1); text-align:center; animation:tkIn .4s ease both; }
+  .tk-qr img{ width:100%; max-width:220px; height:auto; border-radius:10px; background:#fff; padding:8px; margin:0 auto; display:block; }
+  .tk-qr p{ margin:10px 0 0; font-family:var(--f-serif); font-size:13px; line-height:1.4; color:rgba(248,244,233,.74); }
   .tk-chat-bar .tk-mic{ background:none; color:#f8f4e9; border:1px solid rgba(246,242,233,.28); transition:background .25s ease, color .25s ease; }
   .tk-chat-bar .tk-mic:hover{ border-color:#f6f2e9; }
   .tk-chat-bar .tk-mic.on{ background:#a9875a; color:#121214; border-color:#a9875a; animation:micPulse 1.3s ease-in-out infinite; }
@@ -1859,13 +1862,45 @@
       fetch(mcfg.api + "/api/salud?codigo=" + encodeURIComponent(mcfg.codigo), ctl ? { signal: ctl.signal } : {})
         .then(function(r){ clearTimeout(to); cb(r.ok); }).catch(function(){ clearTimeout(to); cb(false); });
     }
+    function tarjetaEl(p, i){
+      var c = document.createElement("div"); c.className = "tk-rec"; if(i) c.style.animationDelay = (i*120) + "ms";
+      var img = document.createElement("img"); img.src = p.imagen || ""; img.alt = (p.marca || "") + " " + (p.nombre || "");
+      img.onerror = function(){ img.style.visibility = "hidden"; };
+      var d = document.createElement("div"), b = document.createElement("b"), em = document.createElement("em"), pp = document.createElement("p");
+      b.textContent = ((p.marca || "") + " " + (p.nombre || "")).trim();
+      em.textContent = (p.ml ? p.ml + " ml · " : "") + (p.precio == null ? "" : p.precio);
+      pp.textContent = p.detalle || p.descripcion || "Disponible en nuestra tienda.";
+      d.appendChild(b); d.appendChild(em); d.appendChild(pp); c.appendChild(img); c.appendChild(d);
+      return c;
+    }
     function mostrarTarjeta(p){
       var wrap = document.createElement("div"); wrap.className = "tk-recs";
-      var c = document.createElement("div"); c.className = "tk-rec";
-      var img = document.createElement("img"); img.src = p.imagen; img.alt = p.marca + " " + p.nombre;
-      var d = document.createElement("div"), b = document.createElement("b"), em = document.createElement("em"), pp = document.createElement("p");
-      b.textContent = p.marca + " " + p.nombre; em.textContent = (p.ml ? p.ml + " ml · " : "") + p.precio; pp.textContent = "Disponible en nuestra tienda.";
-      d.appendChild(b); d.appendChild(em); d.appendChild(pp); c.appendChild(img); c.appendChild(d); wrap.appendChild(c); log.appendChild(wrap); scroll();
+      wrap.appendChild(tarjetaEl(p, 0)); log.appendChild(wrap); scroll();
+    }
+    /* lista de tarjetas con foto; si la tarjeta trae un mensaje para elegir, al tocarla se envía al modelo */
+    function mostrarTarjetas(lista){
+      var wrap = document.createElement("div"); wrap.className = "tk-recs";
+      lista.forEach(function(p, i){
+        var c = tarjetaEl(p, i), msgElegir = p.mensaje || p.mensaje_elegir || p.elegir;
+        if(msgElegir){
+          c.style.cursor = "pointer"; c.setAttribute("role", "button"); c.tabIndex = 0;
+          var go = function(){ if(busy) return; opts.innerHTML = ""; msg(String(msgElegir), "me"); preguntar(String(msgElegir)); };
+          c.addEventListener("click", go);
+          c.addEventListener("keydown", function(ev){ if(ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); go(); } });
+        }
+        wrap.appendChild(c);
+      });
+      log.appendChild(wrap); scroll();
+    }
+    /* QR de pago: imagen propia del negocio (images/qr-pago.png). Si el archivo no existe, avisa en vez de mostrar uno falso. */
+    function mostrarQR(info){
+      var src = (info && typeof info === "object" && (info.imagen || info.url)) || "images/qr-pago.png";
+      var wrap = document.createElement("div"); wrap.className = "tk-recs";
+      var box = document.createElement("div"); box.className = "tk-qr";
+      var img = document.createElement("img"); img.src = src; img.alt = "Código QR para pagar";
+      var cap = document.createElement("p"); cap.textContent = "Escanea este QR con tu app del banco para pagar.";
+      img.onerror = function(){ img.remove(); cap.textContent = "El QR de pago aún no está cargado en la tienda. Pídelo a un asesor por WhatsApp."; };
+      box.appendChild(img); box.appendChild(cap); wrap.appendChild(box); log.appendChild(wrap); scroll();
     }
     async function preguntar(texto){
       busy = true; parar(); opts.innerHTML = "";
@@ -1884,7 +1919,11 @@
             if(e.t === "relleno"){ if(voz && e.b64){ cola.push(e); reproducir(); } }
             else if(e.t === "frase"){ t.remove(); if(!burbuja) burbuja = msg("", "bot"); burbuja.textContent += (burbuja.textContent ? " " : "") + e.texto; scroll(); }
             else if(e.t === "audio" && e.b64){ partes[e.parte] = e; while(partes[sig]){ if(voz) cola.push(partes[sig]); sig++; } if(voz) reproducir(); }
-            else if(e.t === "fin"){ if(e.tarjeta) mostrarTarjeta(e.tarjeta); if(e.opciones && e.opciones.length) opcionesFinales = e.opciones; }
+            else if(e.t === "fin" || e.t === "accion"){
+              if(e.tarjetas && e.tarjetas.length) mostrarTarjetas(e.tarjetas); else if(e.tarjeta) mostrarTarjeta(e.tarjeta);
+              if(e.accion === "mostrar_qr") mostrarQR(e.qr || e.datos);
+              if(e.opciones && e.opciones.length) opcionesFinales = e.opciones;
+            }
             else if(e.t === "error"){ t.remove(); msg(e.detalle || "No pude responder en este momento.", "bot"); }
           }
         }
