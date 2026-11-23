@@ -1,4 +1,5 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><script src="config.js"></script>
+</head><body>
 <title>Perfumería en 3D</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -441,6 +442,8 @@
   .tk-chat-bar{ display:flex; align-items:center; gap:8px; padding:6px 6px 6px 18px; border-radius:99px; background:rgba(246,242,233,.08); border:1px solid rgba(246,242,233,.16); }
   .tk-chat-bar input{ flex:1; min-width:0; background:none; border:0; outline:0; color:#f8f4e9; font-family:var(--f-sans); font-size:14px; padding:10px 0; }
   .tk-chat-bar input::placeholder{ color:rgba(246,242,233,.5); }
+  .tk-chat-bar .tk-voz{ width:auto; height:30px; padding:0 12px; border-radius:99px; background:none; border:1px solid rgba(246,242,233,.28); color:#f8f4e9; font-family:var(--f-sans); font-size:11px; letter-spacing:.06em; }
+  .tk-chat-bar .tk-voz.on{ background:#f6f2e9; color:#18160f; }
   .tk-chat-bar button{ width:40px; height:40px; border-radius:50%; background:#f6f2e9; color:#18160f; display:grid; place-items:center; flex:0 0 auto; }
   .tk-recs{ display:flex; flex-direction:column; gap:10px; align-self:stretch; max-width:100%; }
   .tk-rec{ display:grid; grid-template-columns:78px 1fr; gap:14px; padding:10px; border-radius:16px; background:rgba(246,242,233,.07); border:1px solid rgba(246,242,233,.1); animation:tkIn .4s ease both; }
@@ -1797,9 +1800,73 @@
         scroll();
       });
     }
+    /* ---------- Modo modelo (asesor IA en Kaggle) ----------
+       Configuración: config.js (window.ASESOR_CONFIG = {api, codigo}) o ?api=...&codigo=... en la URL.
+       Si no hay config o el modelo no responde, se usa el cuestionario guiado de arriba. */
+    var LSK = "asesor_cfg", mcfg = { api:"", codigo:"" };
+    try{ Object.assign(mcfg, JSON.parse(localStorage.getItem(LSK) || "{}")); }catch(e){}
+    if(window.ASESOR_CONFIG) Object.assign(mcfg, window.ASESOR_CONFIG);
+    try{
+      var qs = new URLSearchParams(location.search);
+      if(qs.get("api")){ mcfg.api = qs.get("api"); mcfg.codigo = qs.get("codigo") || mcfg.codigo; try{ localStorage.setItem(LSK, JSON.stringify(mcfg)); }catch(e){} history.replaceState(null, "", location.pathname + location.hash); }
+    }catch(e){}
+    mcfg.api = (mcfg.api || "").replace(/\/+$/, "");
+    var model = false, voz = true, cola = [], sonando = null,
+        sesion = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
+    var vozBtn = document.createElement("button"); vozBtn.type = "button"; vozBtn.className = "tk-voz on"; vozBtn.textContent = "Voz"; vozBtn.title = "Respuestas habladas"; vozBtn.style.display = "none";
+    form.insertBefore(vozBtn, form.querySelector('button[type="submit"]'));
+    vozBtn.addEventListener("click", function(){ voz = !voz; vozBtn.classList.toggle("on", voz); if(!voz) parar(); });
+    function parar(){ cola = []; if(sonando){ sonando.pause(); sonando = null; } }
+    function reproducir(){
+      if(sonando || !cola.length) return;
+      var it = cola.shift(), a = new Audio("data:" + it.mime + ";base64," + it.b64); sonando = a;
+      a.onended = a.onerror = function(){ sonando = null; reproducir(); };
+      a.play().catch(function(){ sonando = null; });
+    }
+    function saludo(){ return "Hola, soy el asesor de " + ((window.ASESOR_CONFIG && window.ASESOR_CONFIG.nombre) || "la perfumería") + ". Cuéntame qué aroma buscas y te recomiendo una fragancia del catálogo."; }
+    function starters(){
+      showOpts(["Algo parecido a Bleu de Chanel", "Un perfume fresco para el día", "Para una ocasión especial"], function(i, label){ if(busy) return; opts.innerHTML = ""; msg(label, "me"); preguntar(label); });
+    }
+    function conectarModelo(cb){
+      if(!mcfg.api || !mcfg.codigo){ cb(false); return; }
+      var ctl = window.AbortController ? new AbortController() : null, to = setTimeout(function(){ if(ctl) ctl.abort(); }, 7000);
+      fetch(mcfg.api + "/api/salud?codigo=" + encodeURIComponent(mcfg.codigo), ctl ? { signal: ctl.signal } : {})
+        .then(function(r){ clearTimeout(to); cb(r.ok); }).catch(function(){ clearTimeout(to); cb(false); });
+    }
+    async function preguntar(texto){
+      busy = true; parar(); opts.innerHTML = "";
+      var t = document.createElement("div"); t.className = "tk-m bot typing"; t.innerHTML = "<i></i><i></i><i></i>"; log.appendChild(t); scroll();
+      var burbuja = null, partes = {}, sig = 0, fallo = false;
+      try{
+        var r = await fetch(mcfg.api + "/api/chat", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ sesion:sesion, mensaje:texto, voz:voz, codigo:mcfg.codigo }) });
+        if(!r.ok) throw new Error(r.status);
+        var rd = r.body.getReader(), dec = new TextDecoder(), buf = "";
+        for(;;){
+          var lec = await rd.read(); if(lec.done) break;
+          buf += dec.decode(lec.value, { stream:true }); var i;
+          while((i = buf.indexOf("\n")) >= 0){
+            var linea = buf.slice(0, i); buf = buf.slice(i + 1); if(!linea.trim()) continue;
+            var e = JSON.parse(linea);
+            if(e.t === "relleno"){ if(voz && e.b64){ cola.push(e); reproducir(); } }
+            else if(e.t === "frase"){ t.remove(); if(!burbuja) burbuja = msg("", "bot"); burbuja.textContent += (burbuja.textContent ? " " : "") + e.texto; scroll(); }
+            else if(e.t === "audio" && e.b64){ partes[e.parte] = e; while(partes[sig]){ if(voz) cola.push(partes[sig]); sig++; } if(voz) reproducir(); }
+            else if(e.t === "error"){ t.remove(); msg(e.detalle || "No pude responder en este momento.", "bot"); }
+          }
+        }
+      }catch(err){ fallo = true; }
+      t.remove(); busy = false;
+      if(fallo){
+        model = false; vozBtn.style.display = "none";
+        step = -1; ans = [];
+        bot("Se perdió la conexión con el asesor. Mientras tanto te guío con unas preguntas rápidas.", ask);
+      }
+    }
     function open(){
       if(opened) return; opened = true; chat.classList.add("open");
-      bot("Hola, te ayudo a encontrar algo similar a Bleu de Chanel EDT. Son 3 preguntas rápidas.", ask);
+      conectarModelo(function(ok){
+        if(ok){ model = true; vozBtn.style.display = ""; bot(saludo(), starters); }
+        else bot("Hola, te ayudo a encontrar algo similar a Bleu de Chanel EDT. Son 3 preguntas rápidas.", ask);
+      });
     }
     inp.addEventListener("focus", open);
     form.addEventListener("pointerdown", open);
@@ -1808,6 +1875,7 @@
       var v = inp.value.trim(); if(!v) return; inp.value = "";
       if(!opened){ open(); return; }
       if(busy) return;
+      if(model){ msg(v, "me"); preguntar(v); return; }
       msg(v, "me");
       bot("Por ahora te guío con opciones: elige una de las de abajo para afinar la recomendación.", function(){
         if(step >= 0 && step < Q.length) showOpts(Q[step].o, function(i, label){ ans[step] = i; msg(label, "me"); ask(); });
